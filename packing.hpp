@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cassert>
+#include <string>
+#include <cstring>
 
 #define KMER_LEN 19
 #define PACKED_KMER_LEN ((KMER_LEN+3)/4)
