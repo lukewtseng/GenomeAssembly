@@ -42,5 +42,5 @@ checksmall:
 	diff my_solution.txt $(DATA_DIR)/smaller/$(DATA)_solution.txt
 
 clean:
-	rm -f *.o $(TARGETS) *.stdout *.txt
+	rm -f *.o $(TARGETS) *.dat *.txt
 
