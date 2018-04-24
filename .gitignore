@@ -12,6 +12,10 @@
 # Ignore tempoary files
 *~
 
+# Ignore txt and dat
+*.txt
+*.dat
+
 # Ignore files with extension `.class` & `.sm`
 *.class
 *.sm
