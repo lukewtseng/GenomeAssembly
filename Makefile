@@ -10,7 +10,7 @@ CFLAGS = -g -std=c++11
 LIBS =
 
 TARGETS = kmer_hash
-
+DATA = test
 
 all: $(TARGETS)
 
