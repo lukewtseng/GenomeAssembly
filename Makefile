@@ -11,6 +11,7 @@ LIBS =
 
 TARGETS = kmer_hash
 
+
 all: $(TARGETS)
 
 kmer_hash: kmer_mpi.cpp hashmap_mpi.hpp kmer_t.hpp pkmer_t.hpp packing.hpp read_kmers.hpp butil.hpp
@@ -26,14 +27,18 @@ common.o: common.cpp common.h
 	$(CC) -c $(CFLAGS) common.cpp
 
 run:
-	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 32 ./kmer_hash /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/test.txt test
-
-runsmall:
-	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 1 ./kmer_hash /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/smaller/tiny.txt test
+	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 32 ./kmer_hash /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/$(DATA).txt test
 
 check:
 	cat test*.dat | sort > my_solution.txt
-	diff my_solution.txt /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/smaller/tiny_solution.txt
+	diff my_solution.txt /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/$(DATA)_solution.txt
+
+runsmall:
+	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 1 ./kmer_hash /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/smaller/$(DATA).txt test
+
+checksmall:
+	cat test*.dat | sort > my_solution.txt
+	diff my_solution.txt /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets/smaller/$(DATA)_solution.txt
 
 clean:
 	rm -f *.o $(TARGETS) *.stdout *.txt
