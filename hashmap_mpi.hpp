@@ -1,14 +1,18 @@
 #pragma once 
 
 #include <cstdio>
+#include <iostream>
 #include <unordered_map>
-//#include <unordered_multimap>
+#include <cmath>
+#include <mpi.h>
+#include "kmer_t.hpp"
+
 //using namespace std;
 
-struct mpi_hashmap {
+struct MYMPI_Hashmap {
 
 	// Global MPI metadata
-	size_t n_proc;
+	int n_proc;
 	int rank;
 	
 	// hashtable metadata 
@@ -18,31 +22,129 @@ struct mpi_hashmap {
 	// Main data structure
 	std::unordered_multimap<uint64_t, kmer_pair> table;
 
-
 	// Constuctor
-	mpi_hashmap(size_t size);
+	MYMPI_Hashmap(size_t size);
+	MYMPI_Hashmap(size_t size, int n_proc, int rank);
 	
 	// Functions
 	bool insert(const kmer_pair &kmer);
-	bool find(const pkmer_t &key_kmer, kmer_pair &val_kmer);
+	bool find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool* ready, int index);
 
 	size_t size();
+
+	// Luke's MPI functionality
+	//void update(std::vector< std::list<kmer_pair>> contigs);
+	void update(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
+	void sync_insert();
+	void request();
+	
+	// Original functionality from hw3
 	void write_slot(uint64_t slot, const kmer_pair &kmer);
 	kmer_pair read_slot(uint64_t slot);
-
-	//bool request_slot(uint64_t slot);
-	//bool slot_used(uint64_t slot);
+	bool request_slot(uint64_t slot);
+	bool slot_used(uint64_t slot);
 
 };
 
+enum class Type {
+	insert,
+	request, 
+	response,
+	done,
+};
 
-mpi_hashmap::mpi_hashmap(size_t size) {
-	table.reserve(size);
+struct MYMPI_Msg {
+	int idx;
+	kmer_pair data;
+	pkmer_t key_kmer;
+};
+
+
+MYMPI_Hashmap::MYMPI_Hashmap(size_t size, int n_proc, int rank) {
+	total_size = size;
+	local_size = (size + n_proc - 1) / n_proc;
+	table.reserve(local_size);
+	rank = rank;
+	n_proc = n_proc;
+	if (rank == 0) {
+		std::cout << "$$$$$Initialize hashmap with local size of " << local_size << std::endl;
+	}
 }
 
-bool mpi_hashmap::insert(const kmer_pair &kmer) {
-	uint64_t hash = kmer.hash();
-	auto ret = table.insert(std::make_pair(hash, kmer));
+void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
+	int flag, byte_count;
+	MPI_Status status;
+	MYMPI_Msg msg;
+
+	do {
+		MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
+		if (!flag) 
+			break;
+		
+		MPI_Get_count(&status, MPI_BYTE, &byte_count);
+		MPI_Recv (&msg, byte_count, MPI_BYTE, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &status);	
+		
+		//assert(msg.act == Type::response || msg.act == Type::done);
+		if (status.MPI_TAG == static_cast<int>(Type::done)) {
+			total_done ++;
+		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
+				contigs[msg.idx].emplace_back(msg.data);
+				assert(ready[msg.idx] == false);
+				ready[msg.idx] = true;
+		} else { //Type::request
+			assert(status.MPI_TAG == static_cast<int>(Type::request));
+
+			MYMPI_Msg outgoing_msg;
+			outgoing_msg.idx = -1;	
+			auto result = table.equal_range(msg.key_kmer.hash());
+			for (auto it = result.first; it != result.second; it++) {
+				if (it->second.kmer == msg.key_kmer) {
+					outgoing_msg.data = it->second;
+					break;
+				}
+			}
+			MPI_Request request;
+			MPI_Ibsend(&outgoing_msg, sizeof(MYMPI_Msg), MPI_BYTE, status.MPI_SOURCE, static_cast<int>(Type::response), MPI_COMM_WORLD, &request);
+			
+		}
+		
+	} while (flag);
+
+}
+
+void MYMPI_Hashmap::sync_insert() {
+	int flag, byte_count;
+	MPI_Status status;
+	MYMPI_Msg msg;
+	
+	do {
+		MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
+		if (!flag) 
+			break;
+		
+		MPI_Get_count(&status, MPI_BYTE, &byte_count);
+		MPI_Recv (&msg, byte_count, MPI_BYTE, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, &status);	
+		
+		assert(status.MPI_TAG == static_cast<int>(Type::insert));
+		auto ret = table.insert(std::make_pair(msg.data.hash(), msg.data));		
+	} while (flag);
+}
+
+bool MYMPI_Hashmap::insert(const kmer_pair &kmer) {
+	uint64_t hash = kmer.hash() % total_size;
+	
+	uint64_t local_index = hash % local_size;
+	int which_proc = (hash - local_index) / local_size;
+	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
+
+	if (which_proc == rank) {
+		auto ret = table.insert(std::make_pair(hash, kmer));
+	} else {
+		MPI_Request request;
+		MYMPI_Msg msg;
+		msg.data = kmer;
+		MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int>(Type::insert), MPI_COMM_WORLD, &request);
+	}
 	return true;
 	/*
   uint64_t probe = 0;
@@ -58,17 +160,28 @@ bool mpi_hashmap::insert(const kmer_pair &kmer) {
 	*/
 }
 
-bool mpi_hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer) {
-	uint64_t hash = key_kmer.hash();
-	
-	//typedef std::unordered_multimap<uint64_t, kmer_pair>::iterator MMAPIterator;
-	auto result = table.equal_range(hash);
+bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * ready, int index) {
+	uint64_t hash = key_kmer.hash() % total_size;
+	uint64_t local_index = hash % local_size;
+	uint64_t which_proc = (hash - local_index) / local_size;
+	ready[index] = false;
 
-	for (auto it = result.first; it != result.second; it++) {
-		if (it->second.kmer == key_kmer) {
-			val_kmer = it->second;
-			return true;
+	if (which_proc == rank) {
+		auto result = table.equal_range(hash);
+
+		for (auto it = result.first; it != result.second; it++) {
+			if (it->second.kmer == key_kmer) {
+				val_kmer = it->second;
+				ready[index] = true;
+				return true;
+			}
 		}
+	}	else {
+		MYMPI_Msg pack;
+		MPI_Request request;
+
+		pack.idx = index;
+		MPI_Ibsend(&pack, sizeof(pack), MPI_BYTE, which_proc, static_cast<int> (Type::request), MPI_COMM_WORLD, &request);
 	}
 
 	return false;
@@ -87,6 +200,33 @@ bool mpi_hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer) {
 	return success;
 	*/
 }
-size_t mpi_hashmap::size() {
+
+/*bool MYMPT_Hashmap::slot_used(uint64_t slot) {
+	  return false;
+}
+*/
+
+void MYMPI_Hashmap::write_slot(uint64_t slot, const kmer_pair &kmer) {
+	  // data[slot] = kmer;
+		return;
+}
+
+// kmer_pair HashMap::read_slot(uint64_t slot) {
+	  //return data[slot];
+// }
+
+bool MYMPI_Hashmap::request_slot(uint64_t slot) {
+	  /*
+		if (used[slot] != 0) {
+			return false;
+		} else {
+			used[slot] = 1;
+			return true;
+		}
+		*/
+	return false;
+}
+
+size_t MYMPI_Hashmap::size() {
 	return table.size();
 }

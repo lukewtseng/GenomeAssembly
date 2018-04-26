@@ -28,10 +28,11 @@ void print(std::string format, Args... args) {
 int main(int argc, char **argv) {
 
 	int n_proc = 1, rank = 0;
-	//MPI_Init( &argc, &argv );
-	//MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
-	//MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+	MPI_Init( &argc, &argv );
+	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
+	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
+	print("World size: %d Rank:%d\n", n_proc, rank);
 	std::string kmer_fname = std::string(argv[1]);
 	std::string run_type = "";
 
@@ -40,7 +41,6 @@ int main(int argc, char **argv) {
 	}
 		
 	int ks = kmer_size(kmer_fname);
-
 				  
 	if (ks != KMER_LEN) {			    
 		throw std::runtime_error("Error: " + kmer_fname + " contains " +
@@ -50,28 +50,35 @@ int main(int argc, char **argv) {
 	
 	size_t n_kmers = line_count(kmer_fname);
 	
+	if (rank == 0) {
+		print("Total number of kmers: %d\n", n_kmers);
+	}
+
+	int bufsize = n_kmers * sizeof(MYMPI_Msg) / n_proc;
+	void *bsend_buf = malloc(bufsize);
+	MPI_Buffer_attach(bsend_buf, bufsize);
+	
 	size_t hash_table_size = n_kmers * (1.0 / 0.5);
-	mpi_hashmap hashmap(hash_table_size);
+	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
 	if (run_type == "verbose") {
 		print("Initializing hash table of size %d for %d kmers.\n",
 		hash_table_size, n_kmers);
 	}
 
-	//std::vector <kmer_pair> kmers = read_kmers(kmer_fname, n_proc, rank);
-	std::vector <kmer_pair> kmers = read_kmers(kmer_fname);
+	std::vector <kmer_pair> kmers = read_kmers(kmer_fname, n_proc, rank);
 	
 	if (run_type == "verbose") {
 		print("Finished reading kmers.\n");
 	}
 
-	//for (auto& k : kmers) 
-	//	k.print();
-
 	auto start = std::chrono::high_resolution_clock::now();
 
 	std::vector <kmer_pair> start_nodes;
+
 	for (auto &kmer : kmers) {
+		hashmap.sync_insert();
+
 		bool success = hashmap.insert(kmer);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
@@ -80,8 +87,11 @@ int main(int argc, char **argv) {
 			start_nodes.push_back(kmer);
 		}
 	}
-	print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 
+	MPI_Barrier(MPI_COMM_WORLD);
+
+	//print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
+	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
@@ -92,8 +102,59 @@ int main(int argc, char **argv) {
 
 
 	auto start_read = std::chrono::high_resolution_clock::now();
-	std::list <std::list <kmer_pair>> contigs;
+	std::vector <std::list <kmer_pair>> contigs;
 	
+	for (const auto &start_kmer : start_nodes) {
+		contigs.emplace_back(std::list<kmer_pair> (1, start_kmer));
+	}
+
+	int total_done = 0;
+	uint64_t done_quest = 0;
+	uint64_t quest = start_nodes.size();
+	bool ready[quest];
+	std::fill_n(ready, quest, true);
+	int index;
+	
+	while (total_done < n_proc) {
+		//Check incoming MPI message
+		hashmap.update(contigs, total_done, ready);
+		
+		if (done_quest < quest) {
+			for (int i = 0; i < contigs.size(); i ++) {	
+				if (ready[i]) {
+					if (contigs[i].back().forwardExt() == 'F') {
+						ready[i] = false;
+						done_quest ++;
+					
+						if (done_quest == quest) {
+							MYMPI_Msg pack;
+							MPI_Request request;
+							for (int target = 0; target < n_proc; target ++) {
+								if (target != rank) {
+									MPI_Ibsend(&pack, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
+								}
+							}
+							total_done ++;
+							
+							break;
+						} else {
+							continue;
+						}
+					}
+
+					kmer_pair kmer;
+					bool success = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
+					if (success) {
+						contigs[i].emplace_back(kmer);
+					}
+				}
+			}
+		}
+	}
+
+	MPI_Barrier( MPI_COMM_WORLD );
+	/*
+	std::list <std::list <kmer_pair>> contigs;
 	for (const auto &start_kmer : start_nodes) {
 		std::list <kmer_pair> contig;
 		contig.push_back(start_kmer);
@@ -107,6 +168,7 @@ int main(int argc, char **argv) {
 		}
 		contigs.push_back(contig);
 	}
+	*/
 	
 	auto end_read = std::chrono::high_resolution_clock::now();
 	
@@ -138,7 +200,11 @@ int main(int argc, char **argv) {
 			}
 			fout.close();
 		}
-
+	
+	
+	MPI_Buffer_detach(&bsend_buf, &bufsize);
+	free(bsend_buf);
+	MPI_Finalize( );
 
 	return 0;
 }
