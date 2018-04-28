@@ -28,7 +28,7 @@ common.o: common.cpp common.h
 	$(CC) -c $(CFLAGS) common.cpp
 
 run:
-	salloc -N 4 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 4 -n 4 ./kmer_hash $(DATA_DIR)/$(DATA).txt verbose
+	salloc -N 8 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 8 -n 16 ./kmer_hash $(DATA_DIR)/$(DATA).txt verbose
 
 check:
 	cat test*.dat | sort > my_solution.txt

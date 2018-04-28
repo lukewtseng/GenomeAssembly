@@ -32,7 +32,7 @@ int main(int argc, char **argv) {
 	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-	print("World size: %d Rank:%d\n", n_proc, rank);
+	//print("World size: %d Rank:%d\n", n_proc, rank);
 	std::string kmer_fname = std::string(argv[1]);
 	std::string run_type = "";
 
@@ -62,14 +62,14 @@ int main(int argc, char **argv) {
 	
 	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
-	if (run_type == "verbose") {
+	if (run_type == "verbose" && rank == 0) {
 		print("Initializing hash table of size %d for %d kmers.\n",
 		hash_table_size, n_kmers);
 	}
 
 	std::vector <kmer_pair> kmers = read_kmers(kmer_fname, n_proc, rank);
 	
-	if (run_type == "verbose") {
+	if (run_type == "verbose" && rank == 0) {
 		print("Finished reading kmers.\n");
 	}
 
@@ -89,9 +89,9 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	print ("read %zu kmers, local insert %zu remote insert %zu\n", kmers.size(), hashmap.size(), outgoing);
+	print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), hashmap.size(), outgoing);
 	
-	uint64_t rsize;
+	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
 			if (rank == 0)
 				print ("Hashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
@@ -99,17 +99,18 @@ int main(int argc, char **argv) {
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 			hashmap.sync_insert();
 	}
-	
-
 	MPI_Barrier(MPI_COMM_WORLD);
-	
-	print("@ rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
+
+	assert(rsize == n_kmers);
+	if (rank == 0)
+		print ("Total reduce size %zu\n", rsize);
+	print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
 	
-	if (run_type != "test") {
+	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
 

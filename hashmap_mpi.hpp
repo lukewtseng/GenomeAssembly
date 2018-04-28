@@ -73,9 +73,9 @@ MYMPI_Hashmap::MYMPI_Hashmap(size_t size, int npc, int rk) {
 	n_proc = npc;
 	local_size = (size + n_proc - 1) / n_proc;
 	table.reserve(local_size);
-	print ("#### Split %d into world size of %d\n", size, n_proc);
+	print ("\t#### Split %d into world size of %d\n", size, n_proc);
 	//print ("#### Rank %d initialize hashmap with localsize of %zu\n", rank, local_size);
-	std::cout << "$$$$$ hashmap with local size of " << local_size << std::endl;
+	std::cout << "\t$$$$$ hashmap with local size of " << local_size << std::endl;
 	
 }
 
@@ -146,14 +146,17 @@ void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& tota
 		//assert(msg.act == Type::response || msg.act == Type::done);
 		if (status.MPI_TAG == static_cast<int>(Type::done)) {
 			total_done ++;
+		
 		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
 				contigs[msg.idx].emplace_back(msg.data);
 				assert(ready[msg.idx] == false);
 				ready[msg.idx] = true;
+		
 		} else if (status.MPI_TAG == static_cast<int>(Type::request)) {
-			assert(status.MPI_TAG == static_cast<int>(Type::request));
+			//assert(status.MPI_TAG == static_cast<int>(Type::request));
 			MYMPI_Msg outgoing_msg;
-			outgoing_msg.idx = -1;	
+			outgoing_msg.idx = -1;
+			
 			auto result = table.equal_range(msg.key_kmer.hash());
 			for (auto it = result.first; it != result.second; it++) {
 				if (it->second.kmer == msg.key_kmer) {
@@ -165,7 +168,7 @@ void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& tota
 			MPI_Ibsend(&outgoing_msg, sizeof(MYMPI_Msg), MPI_BYTE, status.MPI_SOURCE, static_cast<int>(Type::response), MPI_COMM_WORLD, &request);
 			
 		} else {
-			std::cout << "Warning, receive irrecognizable MPI TAG: " << status.MPI_TAG << std::endl;
+			std::cout << "\tWarning, receive irrecognizable MPI TAG: " << status.MPI_TAG << std::endl;
 			exit(0);
 		}
 		
