@@ -93,8 +93,8 @@ int main(int argc, char **argv) {
 	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
-			if (rank == 0)
-				print ("Hashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
+			//if (rank == 0)
+			//	print ("\tHashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
 			auto size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 			hashmap.sync_insert();
@@ -102,15 +102,15 @@ int main(int argc, char **argv) {
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	assert(rsize == n_kmers);
-	if (rank == 0)
-		print ("Total reduce size %zu\n", rsize);
+	//if (rank == 0)
+	//	print ("Total reduce size %zu\n", rsize);
 	print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
 	
-	if (run_type != "test" && rank == 0) {
+	if (run_type != "test") {
 		print("Finished inserting in %lf\n", insert_time);
 	}
 
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
 	uint64_t quest = start_nodes.size();
 	bool ready[quest];
 	std::fill_n(ready, quest, true);
-	int index;
+	int index = 0;
 	
 	while (total_done < n_proc) {
 		//Check incoming MPI message
@@ -139,8 +139,10 @@ int main(int argc, char **argv) {
 					if (contigs[i].back().forwardExt() == 'F') {
 						ready[i] = false;
 						done_quest ++;
+						//print ("Rank %d, %d quest done\n", rank, done_quest);
 					
 						if (done_quest == quest) {
+							print("rank %d finish local job\n", rank);
 							MYMPI_Msg pack;
 							MPI_Request request;
 							for (int target = 0; target < n_proc; target ++) {
@@ -159,6 +161,7 @@ int main(int argc, char **argv) {
 					kmer_pair kmer;
 					bool success = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
 					if (success) {
+						//kmer.print();
 						contigs[i].emplace_back(kmer);
 					}
 				}

@@ -62,7 +62,7 @@ enum class Type {
 
 struct MYMPI_Msg {
 	int idx;
-	kmer_pair data;
+	kmer_pair kmer;
 	pkmer_t key_kmer;
 };
 
@@ -94,7 +94,7 @@ void MYMPI_Hashmap::sync_insert() {
 		
 		assert(status.MPI_TAG == static_cast<int>(Type::insert));
 		//std::cout << "success pass assertion" << endl;
-		auto ret = table.insert(std::make_pair(msg.data.hash(), msg.data));		
+		auto ret = table.insert(std::make_pair(msg.kmer.hash(), msg.kmer));		
 	} while (flag);
 }
 
@@ -105,27 +105,15 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
 
 	if (which_proc == rank) {
-		auto ret = table.insert(std::make_pair(hash, kmer));
+		auto ret = table.insert(std::make_pair(kmer.hash(), kmer));
 	} else {
 		outgoing ++;
 		MPI_Request request;
 		MYMPI_Msg msg;
-		msg.data = kmer;
+		msg.kmer = kmer;
 		MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int>(Type::insert), MPI_COMM_WORLD, &request);
 	}
 	return true;
-	/*
-  uint64_t probe = 0;
-	bool success = false;
-	do {
-		uint64_t slot = (hash + probe++) % size();
-		success = request_slot(slot);
-		if (success) {
-			write_slot(slot, kmer);
-		}
-	} while (!success && probe < size());
-	return success;
-	*/
 }
 
 void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
@@ -145,22 +133,26 @@ void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& tota
 
 		//assert(msg.act == Type::response || msg.act == Type::done);
 		if (status.MPI_TAG == static_cast<int>(Type::done)) {
+			print ("Receive Done msg from %d\n", status.MPI_SOURCE);
 			total_done ++;
 		
 		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
-				contigs[msg.idx].emplace_back(msg.data);
-				assert(ready[msg.idx] == false);
-				ready[msg.idx] = true;
+			//print ("Receive response msg from %d, index: %d\n", status.MPI_SOURCE, msg.idx);	
+
+			contigs[msg.idx].emplace_back(msg.kmer);
+			assert(ready[msg.idx] == false);
+			ready[msg.idx] = true;
 		
 		} else if (status.MPI_TAG == static_cast<int>(Type::request)) {
 			//assert(status.MPI_TAG == static_cast<int>(Type::request));
+			//print ("Receive request msg from %d\n", status.MPI_SOURCE);
 			MYMPI_Msg outgoing_msg;
-			outgoing_msg.idx = -1;
+			outgoing_msg.idx = msg.idx;
 			
 			auto result = table.equal_range(msg.key_kmer.hash());
 			for (auto it = result.first; it != result.second; it++) {
 				if (it->second.kmer == msg.key_kmer) {
-					outgoing_msg.data = it->second;
+					outgoing_msg.kmer = it->second;
 					break;
 				}
 			}
@@ -179,12 +171,14 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 	uint64_t hash = key_kmer.hash() % total_size;
 	uint64_t local_index = hash % local_size;
 	int which_proc = (hash - local_index) / local_size;
+	
 	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
 	ready[index] = false;
 
 	if (which_proc == rank) {
-		auto result = table.equal_range(hash);
-
+		//print ("Search within local process %d\n", which_proc);	
+		auto result = table.equal_range(key_kmer.hash());
+	
 		for (auto it = result.first; it != result.second; it++) {
 			if (it->second.kmer == key_kmer) {
 				val_kmer = it->second;
@@ -192,29 +186,16 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 				return true;
 			}
 		}
+		print ("Warning, kmer not found in the local process %d\n", rank);
 	}	else {
-		MYMPI_Msg pack;
+		MYMPI_Msg msg;
 		MPI_Request request;
-
-		pack.idx = index;
-		MPI_Ibsend(&pack, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int> (Type::request), MPI_COMM_WORLD, &request);
+		msg.key_kmer = key_kmer;
+		msg.idx = index;
+		MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int> (Type::request), MPI_COMM_WORLD, &request);
 	}
 
 	return false;
-	/*
-	uint64_t probe = 0;
-	bool success = false;
-	do {
-		uint64_t slot = (hash + probe++) % size();
-		if (slot_used(slot)) {
-			val_kmer = read_slot(slot);
-			if (val_kmer.kmer == key_kmer) {
-				success = true;
-			}
-		}
-	} while (!success && probe < size());
-	return success;
-	*/
 }
 
 /*bool MYMPT_Hashmap::slot_used(uint64_t slot) {
