@@ -90,19 +90,20 @@ int main(int argc, char **argv) {
 	}	
 
 	print ("read %zu kmers, local insert %zu remote insert %zu\n", kmers.size(), hashmap.size(), outgoing);
-	/*
+	
 	uint64_t rsize;
-	while (rsize != n_kmers) {
-			print ("Hashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
+	while (rsize < n_kmers) {
+			if (rank == 0)
+				print ("Hashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
 			auto size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
+			hashmap.sync_insert();
 	}
-	*/
-	hashmap.sync_insert();
+	
 
 	MPI_Barrier(MPI_COMM_WORLD);
-
-	print("@@@@@n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
+	
+	print("@ rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
