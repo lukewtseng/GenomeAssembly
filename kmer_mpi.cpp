@@ -15,14 +15,14 @@
 #include "hashmap_mpi.hpp"
 #include "read_kmers.hpp"
 
+/*
 template <typename ...Args>
 void print(std::string format, Args... args) {
 	fflush(stdout);
-	//if (upcxx::rank_me() == 0) {
-		printf(format.c_str(), args...);
-	//}
+	printf(format.c_str(), args...);
 	fflush(stdout);
 }
+*/
 
 
 int main(int argc, char **argv) {
@@ -54,11 +54,12 @@ int main(int argc, char **argv) {
 		print("Total number of kmers: %d\n", n_kmers);
 	}
 
-	int bufsize = n_kmers * sizeof(MYMPI_Msg) / n_proc;
+	int bufsize = 2 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
 	void *bsend_buf = malloc(bufsize);
 	MPI_Buffer_attach(bsend_buf, bufsize);
 	
 	size_t hash_table_size = n_kmers * (1.0 / 0.5);
+	
 	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
 	if (run_type == "verbose") {
@@ -75,22 +76,33 @@ int main(int argc, char **argv) {
 	auto start = std::chrono::high_resolution_clock::now();
 
 	std::vector <kmer_pair> start_nodes;
-
+	uint64_t outgoing = 0;
 	for (auto &kmer : kmers) {
 		hashmap.sync_insert();
 
-		bool success = hashmap.insert(kmer);
+		bool success = hashmap.insert(kmer, outgoing);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
 		if (kmer.backwardExt() == 'F') {
 			start_nodes.push_back(kmer);
 		}
+	}	
+
+	print ("read %zu kmers, local insert %zu remote insert %zu\n", kmers.size(), hashmap.size(), outgoing);
+	/*
+	uint64_t rsize;
+	while (rsize != n_kmers) {
+			print ("Hashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
+			auto size = hashmap.size();
+			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 	}
+	*/
+	hashmap.sync_insert();
 
 	MPI_Barrier(MPI_COMM_WORLD);
 
-	//print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
+	print("@@@@@n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
