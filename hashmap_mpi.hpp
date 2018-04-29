@@ -2,8 +2,13 @@
 
 #include <cstdio>
 #include <unordered_map>
-//#include <unordered_multimap>
+#include <tbb/task_group.h>
+#include <tbb/concurrent_unordered_map.h>
 //using namespace std;
+
+using namespace tbb;
+
+typedef tbb::concurrent_unordered_multimap<uint64_t,kmer_pair> concurrent_hashmap;
 
 struct mpi_hashmap {
 
@@ -16,8 +21,8 @@ struct mpi_hashmap {
 	size_t local_size;
 
 	// Main data structure
-	std::unordered_multimap<uint64_t, kmer_pair> table;
-
+	//std::unordered_multimap<uint64_t, kmer_pair> table;
+	concurrent_hashmap table;
 
 	// Constuctor
 	mpi_hashmap(size_t size);
@@ -37,7 +42,7 @@ struct mpi_hashmap {
 
 
 mpi_hashmap::mpi_hashmap(size_t size) {
-	table.reserve(size);
+	//table.reserve(size);
 }
 
 bool mpi_hashmap::insert(const kmer_pair &kmer) {

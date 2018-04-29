@@ -10,6 +10,9 @@
 #include <cstddef>
 #include <mpi.h>
 #include <pthread.h>
+#include <tbb/task_group.h>
+#include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_vector.h>
 
 #include "kmer_t.hpp"
 #include "hashmap_mpi.hpp"
@@ -23,6 +26,17 @@ void print(std::string format, Args... args) {
 	//}
 	fflush(stdout);
 }
+
+void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, kmer_pair& kmer) {
+		bool success = hashmap.insert(kmer);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (kmer.backwardExt() == 'F') {
+			start_nodes.push_back(kmer);
+		}
+}
+
 
 
 int main(int argc, char **argv) {
@@ -70,7 +84,7 @@ int main(int argc, char **argv) {
 
 	auto start = std::chrono::high_resolution_clock::now();
 
-	std::vector <kmer_pair> start_nodes;
+	tbb::concurrent_vector <kmer_pair> start_nodes;
 	for (auto &kmer : kmers) {
 		bool success = hashmap.insert(kmer);
 		if (!success) {
