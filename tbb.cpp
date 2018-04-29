@@ -20,8 +20,6 @@
 using namespace tbb;
 using namespace std;
 
-concurrent_unordered_multimap<int,int> cum;
-
 vector<int> vec;
 
 void pushing(int arg){
@@ -33,7 +31,7 @@ void pushing(int arg){
 }
 
 
-void cumpush(int arg){
+void cumpush(concurrent_unordered_multimap<int,int>& cum, int arg){
     for(int i = 0;i < 100; i++){
         cum.insert(make_pair(i%5,1));
     }
@@ -55,6 +53,7 @@ int Fib(int n) {
 
 
 int main(){
+		concurrent_unordered_multimap<int,int> cum;
     pthread_t tid1, tid2;
    /* pthread_create(&tid1,NULL,pushing,NULL);
     pthread_create(&tid2,NULL,pushing,NULL);
@@ -65,8 +64,13 @@ int main(){
     
     // g.run([&]{pushing((1));});
    // g.run([&]{pushing((1));});
-    g.run([&]{cumpush((1));});
-    g.run([&]{cumpush((1));});
+    g.run([&]{
+				cumpush(cum, 1);
+		});
+    
+		g.run([&]{
+					cumpush(cum, 1);
+				});
  
 
     g.wait();
