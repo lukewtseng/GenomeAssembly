@@ -40,12 +40,10 @@ struct MYMPI_Hashmap {
 	size_t size();
 
 	// Luke's MPI functionality
-	//void update(std::vector< std::list<kmer_pair>> contigs);
-	void update(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
+	void sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
 	void sync_insert();
-	void request();
 	
-	// Original functionality from hw3
+	// Unused original functionality from hw3
 	void write_slot(uint64_t slot, const kmer_pair &kmer);
 	kmer_pair read_slot(uint64_t slot);
 	bool request_slot(uint64_t slot);
@@ -53,6 +51,7 @@ struct MYMPI_Hashmap {
 
 };
 
+// Denote the message type
 enum class Type {
 	insert,
 	request, 
@@ -60,11 +59,15 @@ enum class Type {
 	done
 };
 
+// Standardize message package for MPI
 struct MYMPI_Msg {
 	int idx;
 	kmer_pair kmer;
 	pkmer_t key_kmer;
 };
+
+
+void broadcast_done(int n_proc, int rank);
 
 
 MYMPI_Hashmap::MYMPI_Hashmap(size_t size, int npc, int rk) {
@@ -73,10 +76,10 @@ MYMPI_Hashmap::MYMPI_Hashmap(size_t size, int npc, int rk) {
 	n_proc = npc;
 	local_size = (size + n_proc - 1) / n_proc;
 	table.reserve(local_size);
-	print ("\t#### Split %d into world size of %d\n", size, n_proc);
-	//print ("#### Rank %d initialize hashmap with localsize of %zu\n", rank, local_size);
-	std::cout << "\t$$$$$ hashmap with local size of " << local_size << std::endl;
-	
+	if (rank == 0) {
+		print ("#### Split %d into world size of %d\n", size, n_proc);
+		std::cout << "#### Initialize hashmap with local size of " << local_size << std::endl;
+	}	
 }
 
 void MYMPI_Hashmap::sync_insert() {
@@ -116,7 +119,7 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	return true;
 }
 
-void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
+void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
 	int flag, byte_count;
 
 	do {
@@ -133,7 +136,7 @@ void MYMPI_Hashmap::update(std::vector<std::list<kmer_pair>>& contigs, int& tota
 
 		//assert(msg.act == Type::response || msg.act == Type::done);
 		if (status.MPI_TAG == static_cast<int>(Type::done)) {
-			print ("Receive Done msg from %d\n", status.MPI_SOURCE);
+			//print ("Receive Done msg from %d\n", status.MPI_SOURCE);
 			total_done ++;
 		
 		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
@@ -198,32 +201,18 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 	return false;
 }
 
-/*bool MYMPT_Hashmap::slot_used(uint64_t slot) {
-	  return false;
-}
-*/
-
-void MYMPI_Hashmap::write_slot(uint64_t slot, const kmer_pair &kmer) {
-	  // data[slot] = kmer;
-		return;
-}
-
-// kmer_pair HashMap::read_slot(uint64_t slot) {
-	  //return data[slot];
-// }
-
-bool MYMPI_Hashmap::request_slot(uint64_t slot) {
-	  /*
-		if (used[slot] != 0) {
-			return false;
-		} else {
-			used[slot] = 1;
-			return true;
-		}
-		*/
-	return false;
-}
-
 size_t MYMPI_Hashmap::size() {
 	return table.size();
 }
+
+void broadcast_done(int n_proc, int rank) {
+	MYMPI_Msg msg;
+	MPI_Request request;
+	
+	for (int target = 0; target < n_proc; target ++) {
+		if (target != rank) {
+			MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
+		}
+	}
+}
+

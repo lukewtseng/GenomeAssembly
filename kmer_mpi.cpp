@@ -15,16 +15,6 @@
 #include "hashmap_mpi.hpp"
 #include "read_kmers.hpp"
 
-/*
-template <typename ...Args>
-void print(std::string format, Args... args) {
-	fflush(stdout);
-	printf(format.c_str(), args...);
-	fflush(stdout);
-}
-*/
-
-
 int main(int argc, char **argv) {
 
 	int n_proc = 1, rank = 0;
@@ -32,7 +22,6 @@ int main(int argc, char **argv) {
 	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
-	//print("World size: %d Rank:%d\n", n_proc, rank);
 	std::string kmer_fname = std::string(argv[1]);
 	std::string run_type = "";
 
@@ -51,7 +40,7 @@ int main(int argc, char **argv) {
 	size_t n_kmers = line_count(kmer_fname);
 	
 	if (rank == 0) {
-		print("Total number of kmers: %d\n", n_kmers);
+		print("#### Total number of kmers: %d\n", n_kmers);
 	}
 
 	int bufsize = 2 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
@@ -89,12 +78,10 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), hashmap.size(), outgoing);
+	print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
 	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
-			//if (rank == 0)
-			//	print ("\tHashmap size: %zu Reduce size: %zu\n", hashmap.size(), rsize);
 			auto size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 			hashmap.sync_insert();
@@ -102,9 +89,8 @@ int main(int argc, char **argv) {
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	assert(rsize == n_kmers);
-	//if (rank == 0)
-	//	print ("Total reduce size %zu\n", rsize);
-	print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
+	
+	//print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
@@ -131,37 +117,25 @@ int main(int argc, char **argv) {
 	
 	while (total_done < n_proc) {
 		//Check incoming MPI message
-		hashmap.update(contigs, total_done, ready);
+		hashmap.sync_find(contigs, total_done, ready);
 		
 		if (done_quest < quest) {
 			for (int i = 0; i < contigs.size(); i ++) {	
-				if (ready[i]) {
-					if (contigs[i].back().forwardExt() == 'F') {
-						ready[i] = false;
-						done_quest ++;
-						//print ("Rank %d, %d quest done\n", rank, done_quest);
-					
-						if (done_quest == quest) {
-							print("rank %d finish local job\n", rank);
-							MYMPI_Msg pack;
-							MPI_Request request;
-							for (int target = 0; target < n_proc; target ++) {
-								if (target != rank) {
-									MPI_Ibsend(&pack, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
-								}
-							}
-							total_done ++;
-							
-							break;
-						} else {
-							continue;
-						}
-					}
+				if (!ready[i]) continue;
 
+				if (contigs[i].back().forwardExt() == 'F') {
+					ready[i] = false;
+					done_quest ++;
+					
+					if (done_quest == quest) {
+						broadcast_done(n_proc, rank);
+						total_done ++;							
+						break;
+					}
+				} else {
 					kmer_pair kmer;
-					bool success = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
-					if (success) {
-						//kmer.print();
+					bool is_local = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
+					if (is_local) {
 						contigs[i].emplace_back(kmer);
 					}
 				}
@@ -170,22 +144,6 @@ int main(int argc, char **argv) {
 	}
 
 	MPI_Barrier( MPI_COMM_WORLD );
-	/*
-	std::list <std::list <kmer_pair>> contigs;
-	for (const auto &start_kmer : start_nodes) {
-		std::list <kmer_pair> contig;
-		contig.push_back(start_kmer);
-		while (contig.back().forwardExt() != 'F') {
-			kmer_pair kmer;
-			bool success = hashmap.find(contig.back().next_kmer(), kmer);
-			if (!success) {
-				throw std::runtime_error("Error: k-mer not found in hashmap.");
-			}
-			contig.push_back(kmer);
-		}
-		contigs.push_back(contig);
-	}
-	*/
 	
 	auto end_read = std::chrono::high_resolution_clock::now();
 	
