@@ -27,14 +27,52 @@ void print(std::string format, Args... args) {
 	fflush(stdout);
 }
 
-void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, kmer_pair& kmer) {
-		bool success = hashmap.insert(kmer);
+void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
+		/*bool success = hashmap.insert(kmer);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
 		if (kmer.backwardExt() == 'F') {
 			start_nodes.push_back(kmer);
+		}*/
+        int count = 1;
+    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
+		if(count%2) continue;
+        bool success = hashmap.insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
 		}
+		if (it->backwardExt() == 'F') {
+			start_nodes.push_back(*it);
+		}
+        count++;
+        //if(count == 1000000) break;
+	}
+	       
+}
+
+void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
+		/*bool success = hashmap.insert(kmer);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (kmer.backwardExt() == 'F') {
+			start_nodes.push_back(kmer);
+		}*/
+        int count = 1;
+    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
+		if(!count%2) continue;
+        bool success = hashmap.insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (it->backwardExt() == 'F') {
+			start_nodes.push_back(*it);
+		}
+        count++;
+        //if(count == kmers.size()/2-1) break;
+	}
+	       
 }
 
 
@@ -81,19 +119,25 @@ int main(int argc, char **argv) {
 
 	//for (auto& k : kmers) 
 	//	k.print();
-
+    task_group g;
 	auto start = std::chrono::high_resolution_clock::now();
 
 	tbb::concurrent_vector <kmer_pair> start_nodes;
-	for (auto &kmer : kmers) {
-		bool success = hashmap.insert(kmer);
+	/*for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ auto &kmer : kmers) {
+		bool success = hashmap.insert(*it);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
-		if (kmer.backwardExt() == 'F') {
-			start_nodes.push_back(kmer);
+		if (it->backwardExt() == 'F') {
+			start_nodes.push_back(*it);
 		}
-	}
+        
+	}*/
+     g.run([&]{task1(hashmap,start_nodes,kmers);});
+
+     g.run([&]{task2(hashmap,start_nodes,kmers);});
+     g.wait();
+
 	print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 
 	auto end_insert = std::chrono::high_resolution_clock::now();
