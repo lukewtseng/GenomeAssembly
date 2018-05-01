@@ -30,7 +30,7 @@ common.o: common.cpp common.h
 .ONESHELL:
 run:
 	module load tbb
-	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 32 ./kmer_hash $(DATA_DIR)/$(DATA).txt test
+	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 8 ./kmer_hash $(DATA_DIR)/$(DATA).txt test
 
 check:
 	cat test*.dat | sort > my_solution.txt

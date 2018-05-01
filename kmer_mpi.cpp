@@ -10,9 +10,13 @@
 #include <cstddef>
 #include <mpi.h>
 #include <pthread.h>
+#include <thread>
+
 #include <tbb/task_group.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
+//#include <tbb/task_scheduler_init.h>
+
 
 #include "kmer_t.hpp"
 #include "hashmap_mpi.hpp"
@@ -27,54 +31,53 @@ void print(std::string format, Args... args) {
 	fflush(stdout);
 }
 
-void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
-		/*bool success = hashmap.insert(kmer);
+void task1(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, const std::vector<kmer_pair>& kmers) {
+	for (int i = 0; i < kmers.size()/2; i ++) {
+		bool success = hashmap.insert(kmers[i]);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
-		if (kmer.backwardExt() == 'F') {
-			start_nodes.push_back(kmer);
-		}*/
-        int count = 1;
-    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
-		if(count%2) continue;
-        bool success = hashmap.insert(*it);
+		if (kmers[i].backwardExt() == 'F') {
+			start_nodes.emplace_back(kmers[i]);
+		}
+	}
+
+	return;
+	
+	/*
+	int count = 1;
+	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++) {
+		if(count%2 == 0) continue;
+		bool success = hashmap.insert(*it);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
 		if (it->backwardExt() == 'F') {
 			start_nodes.push_back(*it);
 		}
-        count++;
-        //if(count == 1000000) break;
+		count++;
+		//if(count == 1000000) break;
 	}
-	       
+	*/     
 }
 
-void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
-		/*bool success = hashmap.insert(kmer);
+void task2(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, const std::vector<kmer_pair>& kmers) {
+	for (int i = kmers.size()/2; i < kmers.size(); i ++) {
+		bool success = hashmap.insert(kmers[i]);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
 		}
-		if (kmer.backwardExt() == 'F') {
-			start_nodes.push_back(kmer);
-		}*/
-        int count = 1;
-    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
-		if(!count%2) continue;
-        bool success = hashmap.insert(*it);
-		if (!success) {
-			throw std::runtime_error("Error: HashMap is full!");
+		if (kmers[i].backwardExt() == 'F') {
+			start_nodes.emplace_back(kmers[i]);
 		}
-		if (it->backwardExt() == 'F') {
-			start_nodes.push_back(*it);
-		}
-        count++;
-        //if(count == kmers.size()/2-1) break;
 	}
-	       
+
+	return;
 }
 
+void test(mpi_hashmap& hashmap) {
+	return;
+}
 
 
 int main(int argc, char **argv) {
@@ -119,10 +122,17 @@ int main(int argc, char **argv) {
 
 	//for (auto& k : kmers) 
 	//	k.print();
-    task_group g;
+  //task_group g;
 	auto start = std::chrono::high_resolution_clock::now();
+	
+	unsigned int NUM_THREADS = std::thread::hardware_concurrency();
 
+	print ("%d max thread: %d", rank, NUM_THREADS);	
 	tbb::concurrent_vector <kmer_pair> start_nodes;
+	std::thread t1(task1, std::ref(hashmap), std::ref(start_nodes), std::cref(kmers));//(task1, hashmap, start_nodes, kmers);
+	std::thread t2(task2, std::ref(hashmap), std::ref(start_nodes), std::cref(kmers));//(task2, hashmap, start_nodes, kmers);
+	t1.join();
+	t2.join();
 	/*for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ auto &kmer : kmers) {
 		bool success = hashmap.insert(*it);
 		if (!success) {
@@ -133,10 +143,9 @@ int main(int argc, char **argv) {
 		}
         
 	}*/
-     g.run([&]{task1(hashmap,start_nodes,kmers);});
-
-     g.run([&]{task2(hashmap,start_nodes,kmers);});
-     g.wait();
+  // g.run([&]{task1(hashmap,start_nodes,kmers);});   
+	// g.run([&]{task2(hashmap,start_nodes,kmers);});
+  // g.wait();
 
 	print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 
@@ -148,6 +157,7 @@ int main(int argc, char **argv) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
 
+	print ("start node size: %d\n", start_nodes.size());
 
 	auto start_read = std::chrono::high_resolution_clock::now();
 	std::list <std::list <kmer_pair>> contigs;
