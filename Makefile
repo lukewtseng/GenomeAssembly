@@ -12,7 +12,8 @@ LIBS =
 
 TARGETS = kmer_hash
 DATA_DIR = /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets
-DATA = test
+DATA = large
+#DATA = human-chr14-synthetic
 
 
 all: $(TARGETS)
@@ -28,7 +29,7 @@ common.o: common.cpp common.h
 	$(CC) -c $(CFLAGS) common.cpp
 
 run:
-	salloc -N 4 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 4 -n 8 ./kmer_hash $(DATA_DIR)/$(DATA).txt test
+	salloc -N 2 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 2 -n 64 ./kmer_hash $(DATA_DIR)/$(DATA).txt verbose
 
 check:
 	cat test*.dat | sort > my_solution.txt

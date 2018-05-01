@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
 		run_type = std::string(argv[2]);
 	}
 		
-	int ks = kmer_size(kmer_fname);
+	uint64_t ks = kmer_size(kmer_fname);
 				  
 	if (ks != KMER_LEN) {			    
 		throw std::runtime_error("Error: " + kmer_fname + " contains " +
@@ -37,17 +37,17 @@ int main(int argc, char **argv) {
 				std::to_string(KMER_LEN) + "-mers.  Modify packing.hpp and recompile.");
 	}
 	
-	size_t n_kmers = line_count(kmer_fname);
+	uint64_t n_kmers = line_count(kmer_fname);
 	
 	if (rank == 0) {
 		print("#### Total number of kmers: %d\n", n_kmers);
 	}
 
-	int bufsize = 2 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
+	int bufsize = 0.05 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
 	void *bsend_buf = malloc(bufsize);
 	MPI_Buffer_attach(bsend_buf, bufsize);
 	
-	size_t hash_table_size = n_kmers * (1.0 / 0.5);
+	uint64_t hash_table_size = n_kmers * (1.2);//(1.0 / 0.5);
 	
 	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
+	//print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
 	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
 	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
 	
-	if (run_type != "test") {
+	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
 
@@ -111,16 +111,21 @@ int main(int argc, char **argv) {
 	int total_done = 0;
 	uint64_t done_quest = 0;
 	uint64_t quest = start_nodes.size();
-	bool ready[quest];
+	//bool ready[quest];
+	void *dummy_buf = malloc(quest * sizeof(bool));
+    bool* ready = (bool*) dummy_buf;
 	std::fill_n(ready, quest, true);
-	int index = 0;
+	uint64_t index = 0;
+    if(rank == 0){
+      print("rank 0 starting assembly\n");
+    }
 	
 	while (total_done < n_proc) {
 		//Check incoming MPI message
 		hashmap.sync_find(contigs, total_done, ready);
 		
 		if (done_quest < quest) {
-			for (int i = 0; i < contigs.size(); i ++) {	
+			for (uint64_t i = 0; i < contigs.size(); i ++) {	
 				if (!ready[i]) continue;
 
 				if (contigs[i].back().forwardExt() == 'F') {
@@ -154,16 +159,16 @@ int main(int argc, char **argv) {
 	std::chrono::duration <double> total = end - start;
 
 
-	int numKmers = std::accumulate(contigs.begin(), contigs.end(), 0,
-			[] (int sum, const std::list <kmer_pair> &contig) {
+	uint64_t numKmers = std::accumulate(contigs.begin(), contigs.end(), 0,
+			[] (uint64_t sum, const std::list <kmer_pair> &contig) {
 				return sum + contig.size(); 
 			});
 
-	  if (run_type != "test") {
+	  if (run_type != "test" && rank == 0) {
 			print("Assembled in %lf total\n", total.count());
 		}
 		
-		if (run_type == "verbose") {
+		if (run_type == "verbose" && rank == 0) {
 			printf("Rank %d reconstructed %d contigs with %d nodes from %d start nodes."
 					" (%lf read, %lf insert, %lf total)\n", rank, contigs.size(), numKmers, start_nodes.size(), read.count(), insert.count(), total.count());
 		}
@@ -179,6 +184,7 @@ int main(int argc, char **argv) {
 	
 	MPI_Buffer_detach(&bsend_buf, &bufsize);
 	free(bsend_buf);
+    free(dummy_buf);
 	MPI_Finalize( );
 
 	return 0;

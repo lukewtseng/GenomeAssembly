@@ -23,21 +23,21 @@ struct MYMPI_Hashmap {
 	int rank;
 	
 	// hashtable metadata 
-	size_t total_size;
-	size_t local_size;
+	uint64_t total_size;
+	uint64_t local_size;
 
 	// Main data structure
 	std::unordered_multimap<uint64_t, kmer_pair> table;
 
 	// Constuctor
-	MYMPI_Hashmap(size_t size);
-	MYMPI_Hashmap(size_t size, int npc, int rk);
+	MYMPI_Hashmap(uint64_t size);
+	MYMPI_Hashmap(uint64_t size, int npc, int rk);
 	
 	// Functions
 	bool insert(const kmer_pair &kmer, uint64_t& outgoing);
-	bool find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool* ready, int index);
+	bool find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool* ready, uint64_t index);
 
-	size_t size();
+	uint64_t size();
 
 	// Luke's MPI functionality
 	void sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
@@ -61,7 +61,7 @@ enum class Type {
 
 // Standardize message package for MPI
 struct MYMPI_Msg {
-	int idx;
+	uint64_t idx;
 	kmer_pair kmer;
 	pkmer_t key_kmer;
 };
@@ -70,7 +70,7 @@ struct MYMPI_Msg {
 void broadcast_done(int n_proc, int rank);
 
 
-MYMPI_Hashmap::MYMPI_Hashmap(size_t size, int npc, int rk) {
+MYMPI_Hashmap::MYMPI_Hashmap(uint64_t size, int npc, int rk) {
 	total_size = size;
 	rank = rk;
 	n_proc = npc;
@@ -104,7 +104,7 @@ void MYMPI_Hashmap::sync_insert() {
 bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	uint64_t hash = kmer.hash() % total_size;
 	uint64_t local_index = hash % local_size;
-	int which_proc = (hash - local_index) / local_size;
+	int which_proc = int((hash - local_index) / local_size);
 	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
 
 	if (which_proc == rank) {
@@ -140,7 +140,11 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 			total_done ++;
 		
 		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
-			//print ("Receive response msg from %d, index: %d\n", status.MPI_SOURCE, msg.idx);	
+			//print ("Receive response msg from %d, index: %d\n", status.MPI_SOURCE, msg.idx);
+            //TODO
+            if(msg.idx < 0 || msg.idx >= local_size){
+              print("\t\tWARNING: process %d trying to access index %d\n", rank, msg.idx);
+            }
 
 			contigs[msg.idx].emplace_back(msg.kmer);
 			assert(ready[msg.idx] == false);
@@ -170,10 +174,13 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 	} while (flag);
 }
 
-bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * ready, int index) {
+bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * ready, uint64_t index) {
 	uint64_t hash = key_kmer.hash() % total_size;
 	uint64_t local_index = hash % local_size;
-	int which_proc = (hash - local_index) / local_size;
+	int which_proc = int((hash - local_index) / local_size);
+    if(index < 0 || index >= local_size){
+      print("\t\tWARNING: process %d trying to access index %d\n", rank, index);
+    }
 	
 	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
 	ready[index] = false;
@@ -201,7 +208,7 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 	return false;
 }
 
-size_t MYMPI_Hashmap::size() {
+uint64_t MYMPI_Hashmap::size() {
 	return table.size();
 }
 
