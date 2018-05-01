@@ -1,3 +1,4 @@
+#include <tbb/task_scheduler_init.h>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -13,6 +14,8 @@
 #include <tbb/task_group.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
+#include <tbb/tbb.h>
+
 
 #include "kmer_t.hpp"
 #include "hashmap_mpi.hpp"
@@ -27,7 +30,7 @@ void print(std::string format, Args... args) {
 	fflush(stdout);
 }
 
-void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
+void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair>& kmers) {
 		/*bool success = hashmap.insert(kmer);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
@@ -35,9 +38,10 @@ void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes,
 		if (kmer.backwardExt() == 'F') {
 			start_nodes.push_back(kmer);
 		}*/
-        int count = 1;
-    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
+        int count = 0;
+    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++,count++ /*auto &kmer : kmers*/) {
 		if(count%2) continue;
+        else{
         bool success = hashmap.insert(*it);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
@@ -45,13 +49,15 @@ void task1(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes,
 		if (it->backwardExt() == 'F') {
 			start_nodes.push_back(*it);
 		}
-        count++;
-        //if(count == 1000000) break;
+        }
+        //count++;
+        //printf("first %d\n",count);
+       //if(count == 1000000) break;
 	}
 	       
 }
 
-void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers) {
+void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> &kmers) {
 		/*bool success = hashmap.insert(kmer);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
@@ -59,9 +65,32 @@ void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes,
 		if (kmer.backwardExt() == 'F') {
 			start_nodes.push_back(kmer);
 		}*/
+        int count = 0;
+    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++,count++ /*auto &kmer : kmers*/) {
+		if(!count%2) continue;
+        else{
+        bool success = hashmap.insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (it->backwardExt() == 'F') {
+			start_nodes.push_back(*it);
+		}
+        }
+        //count++;
+        //printf("second %d\n",count);
+        //if(count == kmers.size()/2-1) break;
+	}
+	       
+}
+
+void tasking(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers,int num, int order) {
         int count = 1;
     	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
-		if(!count%2) continue;
+		if( count%num != order) {
+            count++;
+            continue;
+        }
         bool success = hashmap.insert(*it);
 		if (!success) {
 			throw std::runtime_error("Error: HashMap is full!");
@@ -71,10 +100,29 @@ void task2(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes,
 		}
         count++;
         //if(count == kmers.size()/2-1) break;
-	}
-	       
+	    }
 }
 
+class first_task:public task{
+    public:
+    task* execute(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers,int num, int order) {
+     int count = 1;
+    	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ /*auto &kmer : kmers*/) {
+	   /*	if( count%num != order) {
+            count++;
+            continue;
+        }*/
+        bool success = hashmap.insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (it->backwardExt() == 'F') {
+			start_nodes.push_back(*it);
+		}
+        count++;
+       }
+ }
+};
 
 
 int main(int argc, char **argv) {
@@ -133,11 +181,22 @@ int main(int argc, char **argv) {
 		}
         
 	}*/
-     g.run([&]{task1(hashmap,start_nodes,kmers);});
-
-     g.run([&]{task2(hashmap,start_nodes,kmers);});
+     /*tbb::task_scheduler_init init(task_scheduler_init::automatic); 
+     first_task& f1 = *new(tbb::task::allocate_root()) first_task(hashmap,start_nodes,kmers,2,0);
+     tbb::task::spawn_root_and_wait(f1);*/
+     int n =2;
+     //for(int i = 0; i< n ;i++){
+     g.run([&]{tasking(hashmap,start_nodes,kmers,n,0);});
+     //init.blocking_terminate();
+     //g.wait();
+     g.run([&]{tasking(hashmap,start_nodes,kmers,n,1);});
+     //g.run([&]{task1(hashmap,start_nodes,kmers);});
+     
+     //g.run([&]{task2(hashmap,start_nodes,kmers);});
+     //}
      g.wait();
-
+     //
+     //g.wait();
 	print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 
 	auto end_insert = std::chrono::high_resolution_clock::now();
