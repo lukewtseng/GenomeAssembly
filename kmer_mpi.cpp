@@ -15,7 +15,7 @@
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_vector.h>
 #include <tbb/tbb.h>
-
+#include <tbb/parallel_for.h>
 
 #include "kmer_t.hpp"
 #include "hashmap_mpi.hpp"
@@ -102,7 +102,56 @@ void tasking(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_node
         //if(count == kmers.size()/2-1) break;
 	    }
 }
+class arg_struct{
+    public:
+    mpi_hashmap* hashmap;
+    tbb::concurrent_vector<kmer_pair>* start_nodes;
+    std::vector<kmer_pair> * kmers;
+    int num;
+    int order;
+    arg_struct(){
+    
+    };
+};
+void* taskforthread(void* voidptr) {
+        arg_struct *ptr = (arg_struct*) voidptr;
+        int count = 1;
+    	for (std::vector<kmer_pair>:: iterator it = ptr->kmers->begin(); it!=ptr->kmers->end();it++ /*auto &kmer : kmers*/) {
+		if( count%(ptr->num) != (0)) {
+            count++;
+            continue;
+        }
+        bool success = ptr->hashmap->insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (it->backwardExt() == 'F') {
+			ptr->start_nodes->push_back(*it);
+		}
+        count++;
+        //if(count == kmers.size()/2-1) break;
+	    }
+}
 
+void* taskforthread2(void* voidptr) {
+        arg_struct *ptr = (arg_struct*) voidptr;
+        int count = 1;
+    	for (std::vector<kmer_pair>:: iterator it = ptr->kmers->begin(); it!=ptr->kmers->end();it++ /*auto &kmer : kmers*/) {
+		if( count%(ptr->num) != (1)) {
+            count++;
+            continue;
+        }
+        bool success = ptr->hashmap->insert(*it);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (it->backwardExt() == 'F') {
+			ptr->start_nodes->push_back(*it);
+		}
+        count++;
+        //if(count == kmers.size()/2-1) break;
+	    }
+}
 class first_task:public task{
     public:
     task* execute(mpi_hashmap &hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, std::vector<kmer_pair> kmers,int num, int order) {
@@ -181,23 +230,31 @@ int main(int argc, char **argv) {
 		}
         
 	}*/
+    arg_struct argst;
+    argst.hashmap = &hashmap;
+    argst.start_nodes = &start_nodes;
+    argst.kmers = &kmers;
+    argst.num=2;
+    argst.order=0;
      /*tbb::task_scheduler_init init(task_scheduler_init::automatic); 
      first_task& f1 = *new(tbb::task::allocate_root()) first_task(hashmap,start_nodes,kmers,2,0);
      tbb::task::spawn_root_and_wait(f1);*/
      int n =2;
+     pthread_t p1,p2;
+     pthread_create(&p1,NULL,taskforthread,&argst);
+     //argst.order=1;
+     pthread_create(&p2,NULL,taskforthread2,&argst);
+     pthread_join(p1,NULL);
+     pthread_join(p2,NULL);
      //for(int i = 0; i< n ;i++){
-     g.run([&]{tasking(hashmap,start_nodes,kmers,n,0);});
-     //init.blocking_terminate();
-     //g.wait();
-     g.run([&]{tasking(hashmap,start_nodes,kmers,n,1);});
+     //g.run([&]{tasking(hashmap,start_nodes,kmers,n,0);});
+     //g.run([&]{tasking(hashmap,start_nodes,kmers,n,1);});
      //g.run([&]{task1(hashmap,start_nodes,kmers);});
-     
-     //g.run([&]{task2(hashmap,start_nodes,kmers);});
+    //g.run([&]{task2(hashmap,start_nodes,kmers);});
      //}
-     g.wait();
-     //
      //g.wait();
-	print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
+     //
+    print("n_kmers: %zu hashmap size:%zu\n", n_kmers, hashmap.size());
 
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
