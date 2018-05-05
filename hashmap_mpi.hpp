@@ -25,6 +25,7 @@ struct mpi_hashmap {
 	concurrent_hashmap table;
 
 	// Constuctor
+	mpi_hashmap();
 	mpi_hashmap(size_t size);
 	
 	// Functions
@@ -40,6 +41,8 @@ struct mpi_hashmap {
 
 };
 
+mpi_hashmap::mpi_hashmap() 
+{}
 
 mpi_hashmap::mpi_hashmap(size_t size) {
 	//table.reserve(size);

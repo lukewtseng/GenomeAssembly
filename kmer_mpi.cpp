@@ -30,8 +30,25 @@ void print(std::string format, Args... args) {
 	//}
 	fflush(stdout);
 }
+void insert(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, const std::vector<kmer_pair>& kmers, int total_n, int tid) {
+	int start, end;
+	start = kmers.size()/total_n * tid;
+	end = (tid == total_n - 1) ? kmers.size() : kmers.size()/total_n * (tid + 1);
+	print ("start index: %d end index: %d\n", start, end);
+	for (int i = start; i < end; i ++) {
+		bool success = hashmap.insert(kmers[i]);
+		if (!success) {
+			throw std::runtime_error("Error: HashMap is full!");
+		}
+		if (kmers[i].backwardExt() == 'F') {
+			start_nodes.emplace_back(kmers[i]);
+		}
+	}
+	return;
 
+}
 void task1(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, const std::vector<kmer_pair>& kmers) {
+	print ("start index: 0 end index: %d\n", kmers.size()/2);
 	for (int i = 0; i < kmers.size()/2; i ++) {
 		bool success = hashmap.insert(kmers[i]);
 		if (!success) {
@@ -41,27 +58,11 @@ void task1(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes,
 			start_nodes.emplace_back(kmers[i]);
 		}
 	}
-
 	return;
-	
-	/*
-	int count = 1;
-	for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++) {
-		if(count%2 == 0) continue;
-		bool success = hashmap.insert(*it);
-		if (!success) {
-			throw std::runtime_error("Error: HashMap is full!");
-		}
-		if (it->backwardExt() == 'F') {
-			start_nodes.push_back(*it);
-		}
-		count++;
-		//if(count == 1000000) break;
-	}
-	*/     
 }
 
 void task2(mpi_hashmap& hashmap, tbb::concurrent_vector<kmer_pair>& start_nodes, const std::vector<kmer_pair>& kmers) {
+	print ("start index: %d end index: %d\n", kmers.size()/2, kmers.size());
 	for (int i = kmers.size()/2; i < kmers.size(); i ++) {
 		bool success = hashmap.insert(kmers[i]);
 		if (!success) {
@@ -114,7 +115,7 @@ int main(int argc, char **argv) {
 	}
 
 	//std::vector <kmer_pair> kmers = read_kmers(kmer_fname, n_proc, rank);
-	std::vector <kmer_pair> kmers = read_kmers(kmer_fname);
+	std::vector <kmer_pair> kmers = read_kmers(kmer_fname, n_proc, rank);
 	
 	if (run_type == "verbose") {
 		print("Finished reading kmers.\n");
@@ -127,12 +128,29 @@ int main(int argc, char **argv) {
 	
 	unsigned int NUM_THREADS = std::thread::hardware_concurrency();
 
-	print ("%d max thread: %d", rank, NUM_THREADS);	
+	print ("%d max thread: %d\n", rank, NUM_THREADS);	
 	tbb::concurrent_vector <kmer_pair> start_nodes;
-	std::thread t1(task1, std::ref(hashmap), std::ref(start_nodes), std::cref(kmers));//(task1, hashmap, start_nodes, kmers);
-	std::thread t2(task2, std::ref(hashmap), std::ref(start_nodes), std::cref(kmers));//(task2, hashmap, start_nodes, kmers);
+	mpi_hashmap h1, h2;
+	int n = 8;
+	std::vector<std::thread> vec_thread;
+	for (int i = 0; i < n; i ++) {
+		std::thread t(insert, std::ref(hashmap), std::ref(start_nodes), std::cref(kmers), n, i);
+		vec_thread.push_back(std::move(t));
+	}
+
+	for (auto& t : vec_thread) {
+		t.join();
+	}
+/*
+	std::thread t1(task, std::ref(h1), std::ref(start_nodes), std::cref(kmers));//(task1, hashmap, start_nodes, kmers);
+	//t1.join()
+	std::thread t2(task2, std::ref(h2), std::ref(start_nodes), std::cref(kmers));//(task2, hashmap, start_nodes, kmers);
 	t1.join();
 	t2.join();
+
+	hashmap.table.insert(h1.table.begin(), h1.table.end());
+	hashmap.table.insert(h2.table.begin(), h2.table.end());
+	*/
 	/*for (std::vector<kmer_pair>:: iterator it = kmers.begin(); it!=kmers.end();it++ auto &kmer : kmers) {
 		bool success = hashmap.insert(*it);
 		if (!success) {
@@ -199,11 +217,15 @@ int main(int argc, char **argv) {
 					" (%lf read, %lf insert, %lf total)\n", rank, contigs.size(), numKmers, start_nodes.size(), read.count(), insert.count(), total.count());
 		}
 			  
+		print ("Contigs size %d\n", contigs.size());
 		if (run_type == "test") {
 			std::ofstream fout("test_" + std::to_string(rank) + ".dat");
+			int count = 0;
 			for (const auto &contig : contigs) {
 				fout << extract_contig(contig) << std::endl;
+				count ++;
 			}
+			print ("Count: %d\n", count);
 			fout.close();
 		}
 
