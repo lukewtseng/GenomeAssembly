@@ -120,21 +120,23 @@ int main(int argc, char **argv) {
 		contigs.emplace_back(std::list<kmer_pair> (1, start_kmer));
 	}
 
-	int total_done = 0;
+	std::atomic<int> total_done = 0;
 	uint64_t done_quest = 0;
 	uint64_t quest = start_nodes.size();
 	//bool ready[quest];
 	void *dummy_buf = malloc(quest * sizeof(bool));
-    bool* ready = (bool*) dummy_buf;
+  bool* ready = (bool*) dummy_buf;
 	std::fill_n(ready, quest, true);
 	uint64_t index = 0;
-    if(rank == 0){
-      print("rank 0 starting assembly\n");
-    }
+  if(rank == 0){
+		print("rank 0 starting assembly\n");
+  }
 	
+	std::thread t2(&MYMPI_Hashmap::sync_find, &hashmap, std::ref(contigs), std::ref(total_done), ready);
+
 	while (total_done < n_proc) {
 		//Check incoming MPI message
-		hashmap.sync_find(contigs, total_done, ready);
+		//hashmap.sync_find(contigs, total_done, ready);
 		
 		if (done_quest < quest) {
 			for (uint64_t i = 0; i < contigs.size(); i ++) {	
@@ -145,7 +147,7 @@ int main(int argc, char **argv) {
 					done_quest ++;
 					
 					if (done_quest == quest) {
-						broadcast_done(n_proc, rank);
+						broadcast_done(n_proc, rank, hashmap.messages);
 						total_done ++;							
 						break;
 					}
@@ -159,6 +161,9 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
+	print ("Finish Assembly\n");
+	pthread_cancel(t2.native_handle());
+	t2.join();
 
 	MPI_Barrier( MPI_COMM_WORLD );
 	

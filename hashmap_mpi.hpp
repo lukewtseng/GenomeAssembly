@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <cmath>
 #include <mpi.h>
+#include <atomic>
+
 #include "kmer_t.hpp"
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_queue.h>
@@ -51,7 +53,7 @@ struct MYMPI_Hashmap {
 	uint64_t size();
 
 	// Luke's MPI functionality
-	void sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
+	void sync_find(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready);
 	void sync_insert();
 	
 	// Unused original functionality from hw3
@@ -151,16 +153,27 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	return true;
 }
 
-void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
+void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready) {
 	int flag, byte_count;
 
 	do {
+
+		while (!messages.empty()) {
+			PK_Msg item;
+			if (messages.try_pop(item)) {
+				MPI_Request request;
+				MPI_Ibsend(&item.data, sizeof(MYMPI_Msg), MPI_BYTE, item.target, static_cast<int>(item.tag), MPI_COMM_WORLD, &request);
+			}
+		}
+
+
+
 		MPI_Status status;
 		MYMPI_Msg msg;
 		
 		MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &flag, &status);
 		if (!flag) 
-			break;
+			continue;
 		
 
 		MPI_Get_count(&status, MPI_BYTE, &byte_count);
@@ -168,7 +181,7 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 
 		//assert(msg.act == Type::response || msg.act == Type::done);
 		if (status.MPI_TAG == static_cast<int>(Type::done)) {
-			//print ("Receive Done msg from %d\n", status.MPI_SOURCE);
+			print ("Receive Done msg from %d\n", status.MPI_SOURCE);
 			total_done ++;
 		
 		} else if (status.MPI_TAG == static_cast<int>(Type::response)) {
@@ -203,7 +216,7 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 			exit(0);
 		}
 		
-	} while (flag);
+	} while (total_done < n_proc);
 }
 
 bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * ready, uint64_t index) {
@@ -230,11 +243,17 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 		}
 		print ("Warning, kmer not found in the local process %d\n", rank);
 	}	else {
-		MYMPI_Msg msg;
-		MPI_Request request;
-		msg.key_kmer = key_kmer;
-		msg.idx = index;
-		MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int> (Type::request), MPI_COMM_WORLD, &request);
+		PK_Msg pkmsg;
+		pkmsg.data.key_kmer = key_kmer;
+		pkmsg.data.idx = index;
+		pkmsg.target = which_proc;
+		pkmsg.tag = Type::request;
+		messages.emplace(pkmsg);
+		//MYMPI_Msg msg;
+		//MPI_Request request;
+		//msg.key_kmer = key_kmer;
+		//msg.idx = index;
+		//MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int> (Type::request), MPI_COMM_WORLD, &request);
 	}
 
 	return false;
@@ -244,13 +263,18 @@ uint64_t MYMPI_Hashmap::size() {
 	return table.size();
 }
 
-void broadcast_done(int n_proc, int rank) {
-	MYMPI_Msg msg;
+void broadcast_done(int n_proc, int rank, msg_queue& messages) {
+	PK_Msg pkmsg;
+	//MYMPI_Msg msg;
 	MPI_Request request;
+	pkmsg.tag = Type::done;
 	
+
 	for (int target = 0; target < n_proc; target ++) {
 		if (target != rank) {
-			MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
+			//MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
+			pkmsg.target = target;
+			messages.emplace(pkmsg);
 		}
 	}
 }
