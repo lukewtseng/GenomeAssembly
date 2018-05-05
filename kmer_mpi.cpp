@@ -9,6 +9,7 @@
 #include <numeric>
 #include <cstddef>
 #include <mpi.h>
+#include <thread>
 #include <pthread.h>
 
 #include "kmer_t.hpp"
@@ -17,10 +18,15 @@
 
 int main(int argc, char **argv) {
 
-	int n_proc = 1, rank = 0;
-	MPI_Init( &argc, &argv );
+	int n_proc = 1, rank = 0, provided;
+	MPI_Init_thread( &argc, &argv, MPI_THREAD_SERIALIZED, &provided );
 	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
+
+	if (rank == 0) { 
+		print ("SINGLE: %d FUNNELED: %d SERIALIZED: %d MULTIPLE: %d\n", MPI_THREAD_SINGLE, MPI_THREAD_FUNNELED, MPI_THREAD_SERIALIZED, MPI_THREAD_MULTIPLE); 
+		print ("Only supported %d\n", provided);
+	}
 
 	std::string kmer_fname = std::string(argv[1]);
 	std::string run_type = "";
@@ -43,7 +49,7 @@ int main(int argc, char **argv) {
 		print("#### Total number of kmers: %d\n", n_kmers);
 	}
 
-	int bufsize = 0.05 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
+	int bufsize = 0.5 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
 	void *bsend_buf = malloc(bufsize);
 	MPI_Buffer_attach(bsend_buf, bufsize);
 	
@@ -65,9 +71,12 @@ int main(int argc, char **argv) {
 	auto start = std::chrono::high_resolution_clock::now();
 
 	std::vector <kmer_pair> start_nodes;
+
+	std::thread t1(&MYMPI_Hashmap::sync_insert, &hashmap);
+
 	uint64_t outgoing = 0;
 	for (auto &kmer : kmers) {
-		hashmap.sync_insert();
+		//hashmap.sync_insert();
 
 		bool success = hashmap.insert(kmer, outgoing);
 		if (!success) {
@@ -78,8 +87,10 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	//print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
+	print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
 	
+	pthread_cancel(t1.native_handle());	
+	t1.join();
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
 			auto size = hashmap.size();
@@ -87,10 +98,11 @@ int main(int argc, char **argv) {
 			hashmap.sync_insert();
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
+	//pthread_cancel(t1.native_handle());	
 
 	assert(rsize == n_kmers);
 	
-	//print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
+	print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
 	
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	

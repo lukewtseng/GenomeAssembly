@@ -6,8 +6,16 @@
 #include <cmath>
 #include <mpi.h>
 #include "kmer_t.hpp"
+#include <tbb/concurrent_unordered_map.h>
+#include <tbb/concurrent_queue.h>
 
 //using namespace std;
+struct MYMPI_Msg;
+struct PK_Msg;
+
+typedef tbb::concurrent_unordered_multimap<uint64_t,kmer_pair> concurrent_hashmap;
+
+typedef tbb::concurrent_queue<PK_Msg> msg_queue;
 
 template <typename ...Args>
 void print(std::string format, Args... args) {
@@ -27,7 +35,10 @@ struct MYMPI_Hashmap {
 	uint64_t local_size;
 
 	// Main data structure
-	std::unordered_multimap<uint64_t, kmer_pair> table;
+	//std::unordered_multimap<uint64_t, kmer_pair> table;
+	concurrent_hashmap table;
+
+	msg_queue messages;
 
 	// Constuctor
 	MYMPI_Hashmap(uint64_t size);
@@ -59,11 +70,18 @@ enum class Type {
 	done
 };
 
+
 // Standardize message package for MPI
 struct MYMPI_Msg {
 	uint64_t idx;
 	kmer_pair kmer;
 	pkmer_t key_kmer;
+};
+
+struct PK_Msg {
+	MYMPI_Msg data;
+	Type tag;
+	int target;
 };
 
 
@@ -75,7 +93,7 @@ MYMPI_Hashmap::MYMPI_Hashmap(uint64_t size, int npc, int rk) {
 	rank = rk;
 	n_proc = npc;
 	local_size = (size + n_proc - 1) / n_proc;
-	table.reserve(local_size);
+	//table.reserve(local_size);
 	if (rank == 0) {
 		print ("#### Split %d into world size of %d\n", size, n_proc);
 		std::cout << "#### Initialize hashmap with local size of " << local_size << std::endl;
@@ -88,6 +106,15 @@ void MYMPI_Hashmap::sync_insert() {
 	MYMPI_Msg msg;
 	
 	do {
+		
+		while (!messages.empty()) {
+			PK_Msg item;
+			if (messages.try_pop(item)) {
+				MPI_Request request;
+				MPI_Ibsend(&item.data, sizeof(MYMPI_Msg), MPI_BYTE, item.target, static_cast<int>(item.tag), MPI_COMM_WORLD, &request);
+			}
+		}
+
 		MPI_Iprobe(MPI_ANY_SOURCE, static_cast<int> (Type::insert), MPI_COMM_WORLD, &flag, &status);
 		if (!flag) 
 			break;
@@ -111,10 +138,15 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 		auto ret = table.insert(std::make_pair(kmer.hash(), kmer));
 	} else {
 		outgoing ++;
-		MPI_Request request;
-		MYMPI_Msg msg;
-		msg.kmer = kmer;
-		MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int>(Type::insert), MPI_COMM_WORLD, &request);
+		//MPI_Request request;
+		PK_Msg pkmsg;
+		pkmsg.data.kmer = kmer;
+		pkmsg.target = which_proc;
+		pkmsg.tag = Type::insert;
+		messages.emplace(pkmsg);
+		//MYMPI_Msg msg;
+		//msg.kmer = kmer;
+		//MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, which_proc, static_cast<int>(Type::insert), MPI_COMM_WORLD, &request);
 	}
 	return true;
 }
