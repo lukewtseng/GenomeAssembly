@@ -122,7 +122,6 @@ int main(int argc, char **argv) {
 	std::atomic<int> total_done = 0;
 	uint64_t done_quest = 0;
 	uint64_t quest = start_nodes.size();
-	//bool ready[quest];
 	void *dummy_buf = malloc(quest * sizeof(bool));
   bool* ready = (bool*) dummy_buf;
 	std::fill_n(ready, quest, true);
@@ -131,11 +130,15 @@ int main(int argc, char **argv) {
 		print("rank 0 starting assembly\n");
   }
 	
+
+	std::atomic<int> isfinish = 0;
+	//Check incoming MPI message
+	
 	std::thread t2(&MYMPI_Hashmap::communicate_messages, &hashmap, std::ref(contigs), std::ref(total_done), ready);
 
+	std::thread t3(&MYMPI_Hashmap::deal_remote_messages, &hashmap, std::ref(contigs), std::ref(total_done), ready, std::ref(isfinish));
+	
 	while (total_done < n_proc) {
-		//Check incoming MPI message
-		//hashmap.sync_find(contigs, total_done, ready);
 		
 		if (done_quest < quest) {
 			for (uint64_t i = 0; i < contigs.size(); i ++) {	
@@ -160,9 +163,12 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
+	isfinish = 1;
 	print ("Finish Assembly\n");
 	pthread_cancel(t2.native_handle());
 	t2.join();
+	pthread_cancel(t3.native_handle());
+	t3.join();
 
 	MPI_Barrier( MPI_COMM_WORLD );
 	

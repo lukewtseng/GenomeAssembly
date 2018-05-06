@@ -56,7 +56,7 @@ struct MYMPI_Hashmap {
 
 	// Luke's MPI functionality
 	void communicate_messages(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready);
-	void deal_remote_messages(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready);
+	void deal_remote_messages(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready, std::atomic<int>& isfinish);
 	
 	void collect_remote_insert();
 	void deal_remote_insert();
@@ -171,13 +171,13 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	}
 	return true;
 }
-void MYMPI_Hashmap::deal_remote_messages(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready) {
+void MYMPI_Hashmap::deal_remote_messages(std::vector<std::list<kmer_pair>>& contigs, std::atomic<int>& total_done, bool* ready, std::atomic<int>& isfinish) {
 	
-	while (1) {
+	while (!isfinish) {
 
 	PK_Msg msg;
 	if (!remote_messages.try_pop(msg))
-		break;
+		continue;
 
 	if (msg.tag == Type::done) {
 			//print ("Receive Done msg from %d\n", status.MPI_SOURCE);
@@ -241,7 +241,7 @@ void MYMPI_Hashmap::communicate_messages(std::vector<std::list<kmer_pair>>& cont
 		receive.tag = static_cast<Type>(status.MPI_TAG);
 		remote_messages.emplace(receive);
 		
-		deal_remote_messages(contigs, total_done, ready);
+		//deal_remote_messages(contigs, total_done, ready);
 	} while (total_done < n_proc);
 }
 
