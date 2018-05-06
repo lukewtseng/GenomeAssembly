@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
 
 	std::vector <kmer_pair> start_nodes;
 
-	std::thread t1(&MYMPI_Hashmap::sync_insert, &hashmap);
+	std::thread t1(&MYMPI_Hashmap::collect_remote_insert, &hashmap);
 
 	uint64_t outgoing = 0;
 	for (auto &kmer : kmers) {
@@ -95,10 +95,9 @@ int main(int argc, char **argv) {
 	while (rsize < n_kmers) {
 			auto size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
-			hashmap.sync_insert();
+			hashmap.collect_remote_insert();
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
-	//pthread_cancel(t1.native_handle());	
 
 	assert(rsize == n_kmers);
 	
@@ -132,7 +131,7 @@ int main(int argc, char **argv) {
 		print("rank 0 starting assembly\n");
   }
 	
-	std::thread t2(&MYMPI_Hashmap::sync_find, &hashmap, std::ref(contigs), std::ref(total_done), ready);
+	std::thread t2(&MYMPI_Hashmap::communicate_messages, &hashmap, std::ref(contigs), std::ref(total_done), ready);
 
 	while (total_done < n_proc) {
 		//Check incoming MPI message
