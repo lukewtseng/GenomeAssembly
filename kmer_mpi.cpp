@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
 
 	int n_proc = 1, rank = 0;
 	MPI_Init( &argc, &argv );
+	//MPI_Init();
 	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
@@ -45,9 +46,10 @@ int main(int argc, char **argv) {
 
 	int bufsize = 0.05 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
 	void *bsend_buf = malloc(bufsize);
+	memset(bsend_buf, 0, bufsize);
 	MPI_Buffer_attach(bsend_buf, bufsize);
 	
-	uint64_t hash_table_size = n_kmers * (1.2);//(1.0 / 0.5);
+	uint64_t hash_table_size = n_kmers / n_proc;//(1.0 / 0.5);
 	
 	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
@@ -82,7 +84,7 @@ int main(int argc, char **argv) {
 	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
-			auto size = hashmap.size();
+			uint64_t size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 			hashmap.sync_insert();
 	}
@@ -95,7 +97,8 @@ int main(int argc, char **argv) {
 	auto end_insert = std::chrono::high_resolution_clock::now();
 	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
-	
+
+	kmers.clear();
 	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
@@ -108,12 +111,12 @@ int main(int argc, char **argv) {
 		contigs.emplace_back(std::list<kmer_pair> (1, start_kmer));
 	}
 
-	int total_done = 0;
+	uint64_t total_done = 0;
 	uint64_t done_quest = 0;
 	uint64_t quest = start_nodes.size();
 	//bool ready[quest];
 	void *dummy_buf = malloc(quest * sizeof(bool));
-    bool* ready = (bool*) dummy_buf;
+  bool* ready = (bool*) dummy_buf;
 	std::fill_n(ready, quest, true);
 	uint64_t index = 0;
     if(rank == 0){
@@ -141,7 +144,8 @@ int main(int argc, char **argv) {
 					kmer_pair kmer;
 					bool is_local = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
 					if (is_local) {
-						contigs[i].emplace_back(kmer);
+						contigs[i].emplace_back(std::move(kmer));
+						//contigs[i].pop_front();
 					}
 				}
 			}

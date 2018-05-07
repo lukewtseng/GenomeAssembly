@@ -31,10 +31,10 @@ size_t line_count(const std::string &fname) {
     throw std::runtime_error("line_count: could not open " + fname);
   }
   size_t n_lines = 0;
-  int n_read;
+  int n_read = 0;
 
   const size_t buf_size = 16384;
-  char buf[buf_size];
+  char buf[buf_size] = {0};
 
   do {
     n_read = fread(buf, sizeof(char), buf_size, f);
@@ -65,7 +65,10 @@ std::vector <kmer_pair> read_kmers(const std::string &fname, int nprocs = 1, int
   fseek(f, line_len*start, SEEK_SET);
 
   std::shared_ptr <char> buf(new char[line_len*size]);
-  fread(buf.get(), sizeof(char), line_len*size, f);
+  memset(buf.get(), 0, line_len*size);
+	
+	fread(buf.get(), sizeof(char), line_len*size, f);
+
 
   std::vector <kmer_pair> kmers;
 

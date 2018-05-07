@@ -7,11 +7,13 @@ CC = CC
 MPCC = CC
 OPENMP = -openmp 
 #Note: this is the flag for Intel compilers. Change this to -fopenmp for GNU compilers. See http://www.nersc.gov/users/computational-systems/edison/programming/using-openmp/
-CFLAGS = -g -std=c++11
-LIBS =
+CFLAGS = -O1 -g -std=c++11 
+LIBS = 
+#-craympich-dpm
 
 TARGETS = kmer_hash
-DATA_DIR = /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets
+#DATA_DIR = /global/project/projectdirs/mp309/cs267-spr2018/hw3-datasets
+DATA_DIR = ${SCRATCH}
 DATA = large
 #DATA = human-chr14-synthetic
 
@@ -29,7 +31,7 @@ common.o: common.cpp common.h
 	$(CC) -c $(CFLAGS) common.cpp
 
 run:
-	salloc -N 2 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 2 -n 64 ./kmer_hash $(DATA_DIR)/$(DATA).txt verbose
+	salloc -N 1 -A mp309 -t 10:00 -q debug --qos=interactive -C haswell srun -N 1 -n 2 ./kmer_hash $(DATA_DIR)/data/$(DATA).txt verbose
 
 check:
 	cat test*.dat | sort > my_solution.txt

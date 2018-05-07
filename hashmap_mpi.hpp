@@ -40,7 +40,7 @@ struct MYMPI_Hashmap {
 	uint64_t size();
 
 	// Luke's MPI functionality
-	void sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
+	void sync_find(std::vector<std::list<kmer_pair>>& contigs, uint64_t& total_done, bool* ready);
 	void sync_insert();
 	
 	// Unused original functionality from hw3
@@ -119,7 +119,7 @@ bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	return true;
 }
 
-void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready) {
+void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, uint64_t& total_done, bool* ready) {
 	int flag, byte_count;
 
 	do {
@@ -147,6 +147,8 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
             }
 
 			contigs[msg.idx].emplace_back(msg.kmer);
+			//contigs[msg.idx].pop_front();
+			
 			assert(ready[msg.idx] == false);
 			ready[msg.idx] = true;
 		
@@ -159,7 +161,7 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 			auto result = table.equal_range(msg.key_kmer.hash());
 			for (auto it = result.first; it != result.second; it++) {
 				if (it->second.kmer == msg.key_kmer) {
-					outgoing_msg.kmer = it->second;
+					outgoing_msg.kmer = std::move(it->second);
 					break;
 				}
 			}
