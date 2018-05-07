@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	//print ("\t rank %d read %zu kmers, local insert %zu remote insert %zu\n", rank, kmers.size(), kmers.size() - outgoing, outgoing);
+	print ("\t rank %d local insert: %zu remote insert: %zu\n", rank, kmers.size() - outgoing, outgoing);
 	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
@@ -122,22 +122,11 @@ int main(int argc, char **argv) {
     if(rank == 0){
       print("rank 0 starting assembly\n");
     }
+    uint64_t remote_insert = 0;
 	
 	while (total_done < n_proc) {
 		//Check incoming MPI message
-        try{
-   		  hashmap.sync_find(contigs, total_done, ready);
-        }
-        catch(...){
-          print("error occured on processing %d during sync_find, printing details...\n", rank);
-          print("number of contigs is %d", contigs.size());
-          int dummy = 0;
-          for(const auto& contig : contigs){
-            dummy += contig.size();
-          }
-          print("total number of kmers is %d\n", dummy);
-        }
-		try{
+   		hashmap.sync_find(contigs, total_done, ready);
 		if (done_quest < quest) {
 			for (uint64_t i = 0; i < contigs.size(); i ++) {	
 				if (!ready[i]) continue;
@@ -152,6 +141,7 @@ int main(int argc, char **argv) {
 						break;
 					}
 				} else {
+                    remote_insert += 1;
 					kmer_pair kmer;
 					bool is_local = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
 					if (is_local) {
@@ -160,19 +150,9 @@ int main(int argc, char **argv) {
 				}
 			}
 		}
-        }catch(...){
-          print("error occured on processing %d during find, printing details...\n", rank);
-          print("number of contigs is %d", contigs.size());
-          int dummy = 0;
-          for(const auto& contig : contigs){
-            dummy += contig.size();
-          }
-          print("total number of kmers is %d\n", dummy);
-        }
 	}
 
 	MPI_Barrier( MPI_COMM_WORLD );
-	try{
 	auto end_read = std::chrono::high_resolution_clock::now();
 	
 	auto end = std::chrono::high_resolution_clock::now();
@@ -202,10 +182,6 @@ int main(int argc, char **argv) {
 			}
 			fout.close();
 		}
-    }catch(...){
-          print("error occured on processing %d during STAGE3, printing details...\n", rank);
-          print("number of contigs is %d", contigs.size());
-    }
 	
 	
 	MPI_Buffer_detach(&bsend_buf, &bufsize);
