@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
 	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
-    print("\trank %d has a hash table size of %I64u, with the max size being %I64u\n", rank, hashmap.size(), hashmap.maxSize());
+//    print("\trank %d has a hash table size of %I64u, with the max size being %I64u\n", rank, hashmap.size(), hashmap.maxSize());
 
 
 	auto start_read = std::chrono::high_resolution_clock::now();
