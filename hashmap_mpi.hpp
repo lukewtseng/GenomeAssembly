@@ -19,8 +19,8 @@ void print(std::string format, Args... args) {
 struct MYMPI_Hashmap {
 
 	// Global MPI metadata
-	int n_proc;
-	int rank;
+	uint64_t n_proc;
+	uint64_t rank;
 	
 	// hashtable metadata 
 	uint64_t total_size;
@@ -31,13 +31,14 @@ struct MYMPI_Hashmap {
 
 	// Constuctor
 	MYMPI_Hashmap(uint64_t size);
-	MYMPI_Hashmap(uint64_t size, int npc, int rk);
+	MYMPI_Hashmap(uint64_t size, uint64_t npc, uint64_t rk);
 	
 	// Functions
 	bool insert(const kmer_pair &kmer, uint64_t& outgoing);
 	bool find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool* ready, uint64_t index);
 
 	uint64_t size();
+    uint64_t maxSize(){return table.max_size();}
 
 	// Luke's MPI functionality
 	void sync_find(std::vector<std::list<kmer_pair>>& contigs, int& total_done, bool* ready);
@@ -67,10 +68,10 @@ struct MYMPI_Msg {
 };
 
 
-void broadcast_done(int n_proc, int rank);
+void broadcast_done(uint64_t n_proc, uint64_t rank);
 
 
-MYMPI_Hashmap::MYMPI_Hashmap(uint64_t size, int npc, int rk) {
+MYMPI_Hashmap::MYMPI_Hashmap(uint64_t size, uint64_t npc, uint64_t rk) {
 	total_size = size;
 	rank = rk;
 	n_proc = npc;
@@ -104,7 +105,7 @@ void MYMPI_Hashmap::sync_insert() {
 bool MYMPI_Hashmap::insert(const kmer_pair &kmer, uint64_t& outgoing) {
 	uint64_t hash = kmer.hash() % total_size;
 	uint64_t local_index = hash % local_size;
-	int which_proc = int((hash - local_index) / local_size);
+	uint64_t which_proc = ((hash - local_index) / local_size);
 	//std::cout << "hash " << hash << " lindex: " << local_index << " sendto: " << which_proc << std::endl;
 
 	if (which_proc == rank) {
@@ -160,6 +161,8 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 			for (auto it = result.first; it != result.second; it++) {
 				if (it->second.kmer == msg.key_kmer) {
 					outgoing_msg.kmer = it->second;
+                    //TODO deleted stuff from hash table
+                    table.erase(it);
 					break;
 				}
 			}
@@ -177,7 +180,7 @@ void MYMPI_Hashmap::sync_find(std::vector<std::list<kmer_pair>>& contigs, int& t
 bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * ready, uint64_t index) {
 	uint64_t hash = key_kmer.hash() % total_size;
 	uint64_t local_index = hash % local_size;
-	int which_proc = int((hash - local_index) / local_size);
+	uint64_t which_proc = int((hash - local_index) / local_size);
     if(index < 0 || index >= local_size){
       print("\t\tWARNING: process %d trying to access index %d\n", rank, index);
     }
@@ -192,6 +195,7 @@ bool MYMPI_Hashmap::find(const pkmer_t &key_kmer, kmer_pair &val_kmer, bool * re
 		for (auto it = result.first; it != result.second; it++) {
 			if (it->second.kmer == key_kmer) {
 				val_kmer = it->second;
+                table.erase(it);
 				ready[index] = true;
 				return true;
 			}
@@ -212,11 +216,11 @@ uint64_t MYMPI_Hashmap::size() {
 	return table.size();
 }
 
-void broadcast_done(int n_proc, int rank) {
+void broadcast_done(uint64_t n_proc, uint64_t rank) {
 	MYMPI_Msg msg;
 	MPI_Request request;
 	
-	for (int target = 0; target < n_proc; target ++) {
+	for (uint64_t target = 0; target < n_proc; target ++) {
 		if (target != rank) {
 			MPI_Ibsend(&msg, sizeof(MYMPI_Msg), MPI_BYTE, target, static_cast<int>(Type::done), MPI_COMM_WORLD, &request);
 		}

@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
 
 	int n_proc = 1, rank = 0;
 	MPI_Init( &argc, &argv );
-	MPI_Comm_size( MPI_COMM_WORLD, &n_proc );			    
+	MPI_Comm_size( MPI_COMM_WORLD, &n_proc);			    
 	MPI_Comm_rank( MPI_COMM_WORLD, &rank );
 
 	std::string kmer_fname = std::string(argv[1]);
@@ -43,7 +43,10 @@ int main(int argc, char **argv) {
 		print("#### Total number of kmers: %d\n", n_kmers);
 	}
 
-	int bufsize = 0.05 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
+	int bufsize = 0.2 * n_kmers * sizeof(MYMPI_Msg) / n_proc;
+    if(rank == 0){
+      print("buffer size is %d bytes, with MPI_msg having size %d\n", bufsize, sizeof(MYMPI_Msg));
+    }
 	void *bsend_buf = malloc(bufsize);
 	MPI_Buffer_attach(bsend_buf, bufsize);
 	
@@ -99,6 +102,7 @@ int main(int argc, char **argv) {
 	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
+    print("\trank %d has a hash table size of %I64u, with the max size being %I64u\n", rank, hashmap.size(), hashmap.maxSize());
 
 
 	auto start_read = std::chrono::high_resolution_clock::now();
@@ -107,10 +111,9 @@ int main(int argc, char **argv) {
 	for (const auto &start_kmer : start_nodes) {
 		contigs.emplace_back(std::list<kmer_pair> (1, start_kmer));
 	}
-
 	int total_done = 0;
-	uint64_t done_quest = 0;
-	uint64_t quest = start_nodes.size();
+	int done_quest = 0;
+	int quest = start_nodes.size();
 	//bool ready[quest];
 	void *dummy_buf = malloc(quest * sizeof(bool));
     bool* ready = (bool*) dummy_buf;
@@ -122,8 +125,19 @@ int main(int argc, char **argv) {
 	
 	while (total_done < n_proc) {
 		//Check incoming MPI message
-		hashmap.sync_find(contigs, total_done, ready);
-		
+        try{
+   		  hashmap.sync_find(contigs, total_done, ready);
+        }
+        catch(...){
+          print("error occured on processing %d during sync_find, printing details...\n", rank);
+          print("number of contigs is %d", contigs.size());
+          int dummy = 0;
+          for(const auto& contig : contigs){
+            dummy += contig.size();
+          }
+          print("total number of kmers is %d\n", dummy);
+        }
+		try{
 		if (done_quest < quest) {
 			for (uint64_t i = 0; i < contigs.size(); i ++) {	
 				if (!ready[i]) continue;
@@ -146,10 +160,19 @@ int main(int argc, char **argv) {
 				}
 			}
 		}
+        }catch(...){
+          print("error occured on processing %d during find, printing details...\n", rank);
+          print("number of contigs is %d", contigs.size());
+          int dummy = 0;
+          for(const auto& contig : contigs){
+            dummy += contig.size();
+          }
+          print("total number of kmers is %d\n", dummy);
+        }
 	}
 
 	MPI_Barrier( MPI_COMM_WORLD );
-	
+	try{
 	auto end_read = std::chrono::high_resolution_clock::now();
 	
 	auto end = std::chrono::high_resolution_clock::now();
@@ -163,7 +186,6 @@ int main(int argc, char **argv) {
 			[] (uint64_t sum, const std::list <kmer_pair> &contig) {
 				return sum + contig.size(); 
 			});
-
 	  if (run_type != "test" && rank == 0) {
 			print("Assembled in %lf total\n", total.count());
 		}
@@ -180,6 +202,10 @@ int main(int argc, char **argv) {
 			}
 			fout.close();
 		}
+    }catch(...){
+          print("error occured on processing %d during STAGE3, printing details...\n", rank);
+          print("number of contigs is %d", contigs.size());
+    }
 	
 	
 	MPI_Buffer_detach(&bsend_buf, &bufsize);
