@@ -40,6 +40,7 @@ int main(int argc, char **argv) {
 	uint64_t n_kmers = line_count(kmer_fname);
 	
 	if (rank == 0) {
+		print("\n------------------------------\n");
 		print("#### Total number of kmers: %d\n", n_kmers);
 	}
 
@@ -55,6 +56,7 @@ int main(int argc, char **argv) {
 	MYMPI_Hashmap hashmap(hash_table_size, n_proc, rank);
 	
 	if (run_type == "verbose" && rank == 0) {
+		//print("\n")
 		print("Initializing hash table of size %d for %d kmers.\n",
 		hash_table_size, n_kmers);
 	}
@@ -81,28 +83,33 @@ int main(int argc, char **argv) {
 		}
 	}	
 
-	print ("\t rank %d local insert: %zu remote insert: %zu\n", rank, kmers.size() - outgoing, outgoing);
-	
 	uint64_t rsize = 0;
 	while (rsize < n_kmers) {
-			auto size = hashmap.size();
+			uint64_t size = hashmap.size();
 			MPI_Allreduce(&size, &rsize, 1, MPI_UNSIGNED_LONG, MPI_SUM, MPI_COMM_WORLD);
 			hashmap.sync_insert();
 	}
 	MPI_Barrier(MPI_COMM_WORLD);
 
 	assert(rsize == n_kmers);
-	
 	//print("Rank: %d n_kmers: %zu hashmap size:%zu\n", rank, n_kmers, hashmap.size());
-	
 	auto end_insert = std::chrono::high_resolution_clock::now();
-	
 	double insert_time = std::chrono::duration <double> (end_insert - start).count();
 	
 	if (run_type != "test" && rank == 0) {
 		print("Finished inserting in %lf\n", insert_time);
 	}
-//    print("\trank %d has a hash table size of %I64u, with the max size being %I64u\n", rank, hashmap.size(), hashmap.maxSize());
+	
+	uint64_t remote_insert = outgoing;
+	uint64_t local_insert = kmers.size() - outgoing;
+	uint64_t rremote_insert = 0;
+	uint64_t rlocal_insert = 0;
+	MPI_Reduce(&remote_insert, &rremote_insert, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Reduce(&local_insert, &rlocal_insert, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+	if (rank == 0) 
+		print ("\t Avg local insert: %zu remote insert: %zu\n", rremote_insert/n_proc, rlocal_insert/n_proc);
+
+	//    print("\trank %d has a hash table size of %I64u, with the max size being %I64u\n", rank, hashmap.size(), hashmap.maxSize());
 
 
 	auto start_read = std::chrono::high_resolution_clock::now();
@@ -114,16 +121,18 @@ int main(int argc, char **argv) {
 	int total_done = 0;
 	int done_quest = 0;
 	int quest = start_nodes.size();
-	//bool ready[quest];
 	void *dummy_buf = malloc(quest * sizeof(bool));
-    bool* ready = (bool*) dummy_buf;
+  bool* ready = (bool*) dummy_buf;
+	
 	std::fill_n(ready, quest, true);
 	uint64_t index = 0;
-    if(rank == 0){
-      print("rank 0 starting assembly\n");
-    }
-    uint64_t remote_insert = 0;
-	
+  
+	if(rank == 0){
+		print("rank 0 starting assembly\n");
+	}
+    
+	uint64_t remote_find = 0;
+	uint64_t local_find = 0;
 	while (total_done < n_proc) {
 		//Check incoming MPI message
    		hashmap.sync_find(contigs, total_done, ready);
@@ -141,11 +150,14 @@ int main(int argc, char **argv) {
 						break;
 					}
 				} else {
-                    remote_insert += 1;
 					kmer_pair kmer;
 					bool is_local = hashmap.find(contigs[i].back().next_kmer(), kmer, ready, i);	
 					if (is_local) {
 						contigs[i].emplace_back(kmer);
+						local_find ++;
+					} else {
+						remote_find += 1;
+				
 					}
 				}
 			}
@@ -153,9 +165,17 @@ int main(int argc, char **argv) {
 	}
 
 	MPI_Barrier( MPI_COMM_WORLD );
-	auto end_read = std::chrono::high_resolution_clock::now();
-	
+	auto end_read = std::chrono::high_resolution_clock::now();	
 	auto end = std::chrono::high_resolution_clock::now();
+
+	uint64_t rremote_find = 0;
+	uint64_t rlocal_find  = 0;
+	MPI_Reduce(&remote_find, &rremote_find, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+	MPI_Reduce(&local_find, &rlocal_find, 1, MPI_UNSIGNED_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+
+	if (rank == 0) {
+		print ("Avg local find: %zu, remote find: %zu\n", rlocal_find/n_proc, rremote_find/n_proc);
+	}
 
 	std::chrono::duration <double> read = end_read - start_read;
 	std::chrono::duration <double> insert = end_insert - start;
@@ -173,6 +193,7 @@ int main(int argc, char **argv) {
 		if (run_type == "verbose" && rank == 0) {
 			printf("Rank %d reconstructed %d contigs with %d nodes from %d start nodes."
 					" (%lf read, %lf insert, %lf total)\n", rank, contigs.size(), numKmers, start_nodes.size(), read.count(), insert.count(), total.count());
+			printf("MPI buffer size: %zu, Ready buffer size: %zu\n", bufsize, quest*sizeof(bool));
 		}
 			  
 		if (run_type == "test") {
@@ -189,5 +210,8 @@ int main(int argc, char **argv) {
     free(dummy_buf);
 	MPI_Finalize( );
 
+
+	//print("\n");
+	
 	return 0;
 }
